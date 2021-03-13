@@ -5,6 +5,7 @@ import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 import org.jsoup.select.Elements;
 
+import javax.print.Doc;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -13,6 +14,9 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.atomic.AtomicInteger;
 
 
 //TODO: change ALL strings to constants
@@ -28,39 +32,28 @@ public class URLDownloader {
     private static final ArrayList<Character> invalidChars =
             new ArrayList<>(Arrays.asList(',', '.', '<', '>', ':', '"', '/', '|', '\\', '?', '*'));
 
+    private HashSet<String> fileNames = new HashSet<>();
+    private static int maxUrls;
+    private static int unique;
+    private static int depthFactor;
+
     public static void main(String[] args) throws IOException {
-        Validate.isTrue(args.length == 4, IO_ERROR_MSG);
+        //TODO: multi threading, ForkJoinPool?, Thread number Threshold!
+        Validate.isTrue(args.length == NUM_OF_ARGS, IO_ERROR_MSG);
         String url = args[0];
-        int maxUrls = Integer.parseInt(args[1]);
-        int depthFactor = Integer.parseInt(args[2]);
-        int crossLevel = Integer.parseInt(args[3]);
+        maxUrls = Integer.parseInt(args[1]);
+        depthFactor = Integer.parseInt(args[2]);
+        unique = Integer.parseInt(args[3]);
         //TODO: verify validity of parameters
         print("Fetching %s...", url);
 
         Document doc = Jsoup.connect(url).get();
         //TODO: save to file
-
         createDirectories(depthFactor);
+
         urlToHtml(doc, url);
+
         Elements links = doc.select("a[href]");
-        Elements media = doc.select("[src]");
-        Elements imports = doc.select("link[href]");
-
-        print("\nMedia: (%d)", media.size());
-        for (Element src : media) {
-            if (src.normalName().equals("img"))
-                print(" * %s: <%s> %sx%s (%s)",
-                        src.tagName(), src.attr("abs:src"), src.attr("width"), src.attr("height"),
-                        trim(src.attr("alt"), 20));
-            else
-                print(" * %s: <%s>", src.tagName(), src.attr("abs:src"));
-        }
-
-        print("\nImports: (%d)", imports.size());
-        for (Element link : imports) {
-            print(" * %s <%s> (%s)", link.tagName(), link.attr("abs:href"), link.attr("rel"));
-        }
-
         print("\nLinks: (%d)", links.size());
         for (Element link : links) {
             print(" * a: <%s>  (%s)", link.attr("abs:href"), trim(link.text(), 35));
@@ -68,15 +61,11 @@ public class URLDownloader {
     }
 
     private static void createDirectories(int depthFactor) {
-        for (int i = 0; i<=depthFactor;i++)
-        {
+        for (int i = 0; i <= depthFactor; i++) {
             try {
-
                 Path path = Paths.get(String.valueOf(i));
                 Files.createDirectory(path);
-            }
-
-            catch (IOException e){
+            } catch (IOException e) {
                 System.out.println("Error creating directory");
                 e.printStackTrace();
             }
@@ -84,10 +73,9 @@ public class URLDownloader {
     }
 
 
-    private static void urlToHtml(Document doc, String url) {
+    private static void urlToHtml(Document doc, String fileName) {
         try {
             //TODO: remove https://
-            String fileName = url.replaceAll("https://", "").replaceAll(invalidCharRegex, "_")+".html";
             File newFile = new File(fileName);
             if (newFile.createNewFile()) {
                 System.out.println("File " + fileName + " created");
@@ -124,4 +112,55 @@ public class URLDownloader {
         else
             return s;
     }
+
+    private class URLTask implements Runnable {
+        private Thread _myThread;
+        private String _url;
+        private int _level;
+        private AtomicInteger _filesCreatedByParent;
+        private AtomicInteger _filesCreated;
+
+
+        public URLTask(URLDownloader downloader, String url, int level, AtomicInteger filesCreatedByParent) {
+            _url = url;
+            _level = level;
+            _filesCreatedByParent = filesCreatedByParent;
+            _filesCreated = new AtomicInteger(0);
+        }
+
+        @Override
+        public void run() {
+            //add self
+            try{
+
+                String fileName = _url.replaceAll("https://", "").replaceAll(invalidCharRegex, "_")
+                        + ".html";
+                Document doc = Jsoup.connect(_url).get();
+                if (unique == 0 || !fileNames.contains(fileName)) {
+                    urlToHtml(doc, _url);
+                    _filesCreatedByParent.getAndIncrement();
+                }
+            }
+            catch (IOException e){
+                //TODO: something
+            }
+
+            //TODO: handle children, should be in thread
+//            if (_level <= depthFactor) {
+//                Elements links = doc.select("a[href]");
+//                int pagesToLoad = Math.min(links.size(),maxUrls);
+//                int i = 0;
+//                while (i<pagesToLoad)
+//                {
+//
+//                }
+//                for (Element link : links) {
+//                    print(" * a: <%s>  (%s)", link.attr("abs:href"), trim(link.text(), 35));
+//                }
+//            }
+
+        }
+
+    }
+
 }
