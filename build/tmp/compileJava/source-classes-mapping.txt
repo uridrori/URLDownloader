@@ -1,2 +1,3 @@
 URLDownloader.java
  URLDownloader
+ URLDownloader$URLTask

@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 
 //TODO: change ALL strings to constants
+//TODO: documentation
 
 public class URLDownloader {
     private static final int NUM_OF_ARGS = 4;
@@ -32,32 +33,34 @@ public class URLDownloader {
     private static final ArrayList<Character> invalidChars =
             new ArrayList<>(Arrays.asList(',', '.', '<', '>', ':', '"', '/', '|', '\\', '?', '*'));
 
-    private HashSet<String> fileNames = new HashSet<>();
+    private static final HashSet<String> fileNames = new HashSet<>();
     private static int maxUrls;
     private static int unique;
     private static int depthFactor;
 
     public static void main(String[] args) throws IOException {
-        //TODO: multi threading, ForkJoinPool?, Thread number Threshold!
+        //TODO: multi threading, ForkJoinPool? Thread number Threshold?
         Validate.isTrue(args.length == NUM_OF_ARGS, IO_ERROR_MSG);
         String url = args[0];
         maxUrls = Integer.parseInt(args[1]);
         depthFactor = Integer.parseInt(args[2]);
         unique = Integer.parseInt(args[3]);
-        //TODO: verify validity of parameters
-        print("Fetching %s...", url);
-
-        Document doc = Jsoup.connect(url).get();
-        //TODO: save to file
+//        //TODO: verify validity of parameters
+//        print("Fetching %s...", url);
+//
+//        Document doc = Jsoup.connect(url).get();
+//        //TODO: save to file
         createDirectories(depthFactor);
 
-        urlToHtml(doc, url);
-
-        Elements links = doc.select("a[href]");
-        print("\nLinks: (%d)", links.size());
-        for (Element link : links) {
-            print(" * a: <%s>  (%s)", link.attr("abs:href"), trim(link.text(), 35));
-        }
+        URLTask mainTask = new URLTask(url, 0, new AtomicInteger(0));
+        mainTask.start();
+//        urlToHtml(doc, url);
+//
+//        Elements links = doc.select("a[href]");
+//        print("\nLinks: (%d)", links.size());
+//        for (Element link : links) {
+//            print(" * a: <%s>  (%s)", link.attr("abs:href"), trim(link.text(), 35));
+//        }
     }
 
     private static void createDirectories(int depthFactor) {
@@ -85,7 +88,7 @@ public class URLDownloader {
             }
         } catch (IOException e) {
 
-            System.out.println("Error creating file");
+            System.out.println("Error creating file ");
             e.printStackTrace();
         }
     }
@@ -113,15 +116,15 @@ public class URLDownloader {
             return s;
     }
 
-    private class URLTask implements Runnable {
+    private static class URLTask implements Runnable {
         private Thread _myThread;
-        private String _url;
-        private int _level;
+        private final String _url;
+        private final int _level;
         private AtomicInteger _filesCreatedByParent;
         private AtomicInteger _filesCreated;
 
 
-        public URLTask(URLDownloader downloader, String url, int level, AtomicInteger filesCreatedByParent) {
+        public URLTask(String url, int level, AtomicInteger filesCreatedByParent) {
             _url = url;
             _level = level;
             _filesCreatedByParent = filesCreatedByParent;
@@ -131,34 +134,47 @@ public class URLDownloader {
         @Override
         public void run() {
             //add self
-            try{
-
-                String fileName = _url.replaceAll("https://", "").replaceAll(invalidCharRegex, "_")
+//            System.out.println("running url "+_myThread.getName());
+            try {
+                String fileName = _url
+                        .replaceAll("https://", "")
+                        .replaceAll(invalidCharRegex,
+                                "_")
                         + ".html";
                 Document doc = Jsoup.connect(_url).get();
-                if (unique == 0 || !fileNames.contains(fileName)) {
-                    urlToHtml(doc, _url);
-                    _filesCreatedByParent.getAndIncrement();
+                synchronized (fileNames) {
+                    if (unique == 0 || !fileNames.contains(fileName)) {
+                        fileNames.add(fileName);
+                        fileName = String.valueOf(_level) + "/" + fileName;
+                        urlToHtml(doc, fileName);
+                        _filesCreatedByParent.getAndIncrement();
+                    }
                 }
-            }
-            catch (IOException e){
+                if (_level <= depthFactor) {
+                    Elements links = doc.select("a[href]");
+                    int pagesToLoad = Math.min(links.size(), maxUrls);
+                    int i = 0;
+                    for (Element link : links) {
+                        if (_filesCreated.get() >= pagesToLoad || i >= links.size()) {
+                            break;
+                        }
+                        String newUrl = link.attr("abs:href");
+                        URLTask newTask = new URLTask(newUrl, _level + 1, _filesCreated);
+                        newTask.start();
+                        i++;
+                    }
+                }
+            } catch (IOException e) {
                 //TODO: something
             }
 
-            //TODO: handle children, should be in thread
-//            if (_level <= depthFactor) {
-//                Elements links = doc.select("a[href]");
-//                int pagesToLoad = Math.min(links.size(),maxUrls);
-//                int i = 0;
-//                while (i<pagesToLoad)
-//                {
-//
-//                }
-//                for (Element link : links) {
-//                    print(" * a: <%s>  (%s)", link.attr("abs:href"), trim(link.text(), 35));
-//                }
-//            }
+        }
 
+        public void start() {
+            if (_myThread == null) {
+                _myThread = new Thread(this, _url);
+                _myThread.start();
+            }
         }
 
     }
